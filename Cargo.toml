@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "crates/query-engine-core",
+    "crates/query-engine-datatypes",
+]
+resolver = "2"
+
+[workspace.dependencies]
+arrow = "53"

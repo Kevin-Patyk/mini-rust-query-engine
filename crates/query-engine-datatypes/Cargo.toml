@@ -1,0 +1,7 @@
+[package]
+name = "query-engine-datatypes"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arrow = { workspace = true }
