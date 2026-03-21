@@ -1,0 +1,162 @@
+The Type System
+
+Every query engine needs a type system - a way to represent and reason about data types. When you write `SELECT price * quantity`, the engine must know that `price` and `quantity` are numbers that can be multiplied, and what the result will be. This chapter builds the type system on top of Apache Arrow.
+
+-----
+
+Consider this query:
+
+```
+SELECT name, salary * 1.1 AS new_salary
+FROM employees
+WHERE department = 'Engineering'
+```
+
+Before executing, the query engine must answer:
+
+* Is `salary` a numeric type that supports multiplication?
+* What's the result type of `salary * 1.1`? (If `salary` is an integer, should the result be integer or floating point?)
+* Is `department` a string type that supports equality comparison?
+* What columns and types does the result have?
+
+These questions arise during query planning, before we touch any data. A well-designed type system catches errors early ("you can't multiply a string by a number") and enables optimizations ("this column is never null, so skip null checks").
+
+-----
+
+Building on Arrow
+
+Rather than invent our type system, we will use Apache Arrow's types directly. This gives us:
+
+* A rich set of standard types (integers, floats, strings, dates, etc.).
+* Efficient in-memory representation (as covered in the previous chapter).
+* Compatibility with Arrow-based tools and file formats.
+
+Arrow's type system includes:
+
+* Boolean - Bool
+* Integers - Int8, Int16, Int32, Int64 (signed and unsigned)
+* Floating point - Float32, Float64
+* Text - Utf8 (variable-length strings)
+* Binary - Binary (variable-length bytes)
+* Temporal - Date32, Date64, Timestamp, Time32, Time64, Duration
+* Nested - List, Struct, Map
+
+For our engine, we will focus on the common types: Booleans, integers, floating point numbers, and strings. 
+
+-----
+
+Schemas and Fields
+
+A schema describes the structure of a dataset: what columns exist and what type each has. Schemas are essential metadata that flows through the entire query engine. 
+
+Arrow represents schemas as a list of fields, where each field has:
+
+* A name (string)
+* A data type (ArrowType)
+* A nullable flag (can this column contain nulls?)
+
+For example, an employee table might have this schema:
+
+```
+Schema:
+  - id: Int32, not nullable
+  - name: Utf8, nullable
+  - department: Utf8, nullable
+  - salary: Float64, not nullable
+```
+
+Schemas serve multiple purposes:
+
+1. Validation: Reject queries that reference non-existent columns or misuse types.
+2. Planning: Determine output types for expressions.
+3. Optimization: Skip null checks for non-nullable columns.
+4. Execution: Allocate correctly-typed storage for results.
+
+-----
+
+Column Vectors
+
+Arrow stores column data in vectors (also called arrays). Each vector type has its own class: `IntVector`, `Float8Vector`, `VarCharVector`, etc. This is efficient but inconvenient - code that processes columns would need type-specific branches everywhere.
+
+Our code will introduce a `ColumnVector` interface to abstract over the underlying Arrow vectors.
+
+Arrow has a different class for every type. If we are writing code that processes columns, we would have to write something like:
+
+```
+if column is IntVector -> do int stuff
+if column is Float8Vector -> do float stuff
+if column is VarCharVector -> do string stuff
+```
+
+That branching logic would have to be repeated everywhere in the codebase that touches column data, which is messy and hard to maintain.
+
+The solution is to use `ColumnVector`, an abstraction that sits on top of all those different Arrow vector types and presents a single unified interface. So the rest of the engine just works with `ColumnVector` without caring what the underlying Arrow type actually is. The type-specific branching is handled once, inside the `ColumnVector` implementation, rather than scattered everywhere.
+
+A column vector is just the data for a single column. So if you have a table with 3 columns and 100 rows, you have 3 column vectors each with 100 values. Each one holds all the values for that column.
+
+The data type describes what kind of data the column vector holds. So a column vector has a data type and then the actual values match that type. The data type is the description, the column vector is the data.
+
+-----
+
+Literal Values
+
+Sometimes we need a "column" that contains the same value repeated. For example, when evaluating `salary * 1.1`, the literal `1.1` acts like a column of 1.1 values (one per row in the batch). 
+
+Rather than allocate memory for thousands of identical values, we create a virtual column. This returns the same value for any valid index, using constant memory regardless of how many rows we are processing.
+
+When the engine evaluates an expression like `salary * 1.1`, it processes data in batches - say 1,000 rows at a time. The `salary` column is an `ArrowFieldVector` with 1,000 real values. But `1.1` is just a single literal - it doesn't have 1,000 values.
+
+To keep things uniform, the engine treats everything as a column vector. That way, the same multiplication logic works regardless of whether the input is a real column or a literal - it just calls `get_value(i)` on both sides.
+
+The naive solution would be to allocate an actual array of 1,000 identical `1.1` values, but that wastes memory. Instead, `LiteralValueVector` is a virtual column - it stores the value just ones and returns it for any valid index. From the outside, it looks and behaves like any other ColumnVector, but under the hood it's just returning the same value every time.
+
+`LiteralValueVector` is a single value that pretends to be a full column. Every time the engine calls `get_value(i)` it, no matter what `i` is, it get's back the same value. It's an illusion of a column.
+
+When we need it, like when the engine encounters `salary * 1.1`, it creates a `LiteralValueVector` with `data_type: Float64, `value: 1.1`, and `size` set to however many numbers of rows are in the current batch. Then it can treat it exactly like any other `ColumnVector` and multiply it against the salary column row-by-row.
+
+-----
+
+Record Batches
+
+A record batch groups multiple columns together with a schema. This is the fundamental unit of data that flows through our query engine.
+
+Record batches enable batch processing: rather than processing one row at a time (slow due to function call overhead) or loading entire datasets into memory (impractical for large data), we process chunks of typically 1,000 to 100,000 rows.
+
+A `RecordBatch` is the fundamental unit of data that flows through the query engine. Every operation - filtering, joining, aggregation - takes record batches as input and produces record batches as output.
+
+It's simply a collection of columns tied together under a shared schema. All columns in a batch have the same length, which is what makes it meaningful - row `i` in the `salary` column corresponds to row `i` in the `department` column.
+
+The batch size is a deliberate engineering tradeoff. Processing one row at a time is slow because of the overhead of function calls and type checking on every single row. Loading an entire dataset all at once is impractical for large data that doesn't fit into memory. 1,000 to 100,000 is the sweet spot - large enough to amortize overhead, small enough to fit in CPU cache and enabled streaming where data is processed as it arrives rather than all at once.
+
+This is also why `size()` on `LiteralValueVector` takes the batch size rather than just being 1 - the literal needs to appear once per row in the batch, so it needs to know how many rows are currently being processed.
+
+As a note, the schema describes the structure - the names and types of the columns. The record batch holds the actual data - the column vectors with real values. The schema is the blueprint, the record batch is the building. The schema says "there is a column called `salary` of type `Float64`" and the record batch holds the actual salary values for the current chunk of rows. 
+
+The record batch needs the schema so the engine knows what each column vector actually represents - without it, you'd just have a list of columns with no names or types attached.
+
+-----
+
+Type Coercion
+
+Real query engines need type coercion: automatically converting types when necessary. For example:
+
+* `5 * 3.14` should promote the integer `5` to a float.
+* Comparing `Int32` to `Int64` should work without explicit casts.
+* String-to-date conversion for predicates like `date > '2024-01-01'`.
+
+Our query engine keeps things simple and requires explicit types in most cases. A production query engine would implement coercion rules, typically promoting the "wider" type (Int32 -> Int64 -> Float64).
+
+-----
+
+Putting It Together
+
+Here's how these pieces fit together. When processing a query: 
+
+1. Data sources provide schemas describing available columns.
+2. Query planning uses schemas to validate expressions and determine result types.
+3. Execution passes record batch between operators. 
+4. Each operator produces output batches with a known schema.
+
+The type system is the foundation that makes this possible. Without it, we couldn't validate queries, plan efficiently, or allocate storage correctly. The next chapter builds on this foundation to create abstractions for reading data from files.
+
+-----

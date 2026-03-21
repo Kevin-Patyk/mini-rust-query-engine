@@ -7,7 +7,7 @@ use crate::arrow_type::ArrowType;
 /// ColumnVector is a trait defining the interface for working with column data.
 /// It abstracts over different column implementations so the rest of the engine
 /// can read column data without caring about the underlying storage.
-
+///
 /// Abstraction over different implementations of a column vector.
 /// This trait allows the rest of the engine to work with column data
 /// without caring about the underlying Arrow vector type.

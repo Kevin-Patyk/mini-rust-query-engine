@@ -4,8 +4,16 @@ use crate::arrow_type::ArrowType;
 use crate::column_vector::ColumnVector;
 use crate::schema::Schema;
 
+/// Summary:
+/// RecordBatch is a collection of equal-length columns paired with schema, representing a table of data in memory.
+/// new() creates a new RecordBatch from a Schema and a Vec of Arc wrapped ColumnVectors.
+/// row_count() returns the number of rows by asking the first column for its size.
+/// column_count() returns the number of columns in the batch.
+/// field() returns a clone of the Arc wrapped ColumnVector at a given index.
+/// to_csv() serializes the batch into a command separated string.
+///
 /// A RecordBatch is essentially a table of data in memory - a collection of columns that all have the same length,
-/// paired with a schema the describes what those columns are.
+/// paired with a schema that describes what those columns are.
 /// This is the fundamental unit of data that flows through the query engine.
 /// Schema is the blueprint (column names and types) and the RecordBatch is the actual chunk of data conforming to that blueprint.
 pub struct RecordBatch {
@@ -60,7 +68,7 @@ impl RecordBatch {
         for row_index in 0..self.row_count() {
             for col_index in 0..self.column_count() {
                 if col_index > 0 {
-                    output.push_str(",");
+                    output.push(',');
                 }
                 let col = &self.fields[col_index];
                 let value = col.get_value(row_index);
@@ -111,7 +119,10 @@ impl RecordBatch {
                     },
                 }
             }
-            output.push_str("\n");
+            // push_str() expects a string slice &str, which has some overhead for a single character.
+            // push() takes a char directly which is more efficient since there's no need to treat it as a string.
+            // For a single character, use push() but for a String use push_str()
+            output.push('\n');
         }
         output
     }
@@ -119,9 +130,72 @@ impl RecordBatch {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use arrow::array::{Float64Array, Int32Array, StringArray};
 
-    fn _create_record_batch() -> RecordBatch {
-        unimplemented!()
+    use super::*;
+    use crate::arrow_field_vector::ArrowFieldVector;
+    use crate::schema::Field;
+
+    fn create_record_batch() -> RecordBatch {
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    name: "id".to_string(),
+                    data_type: ArrowType::Int32,
+                },
+                Field {
+                    name: "name".to_string(),
+                    data_type: ArrowType::String,
+                },
+                Field {
+                    name: "salary".to_string(),
+                    data_type: ArrowType::Float64,
+                },
+            ],
+        };
+
+        // The vec![] macro infers its type from the first element, which would be Arc<ArrowFieldVector>.
+        // But RecordBatch expects `Vec<Arc<dyn ColumnVector>>`.
+        // We need to explicitly tell Rust to coerce each element to the trait object.
+        // This is a common pattern in Rust.
+        let fields: Vec<Arc<dyn ColumnVector>> = vec![
+            Arc::new(ArrowFieldVector::new(Arc::new(Int32Array::from(vec![
+                1, 2, 3,
+            ])))),
+            Arc::new(ArrowFieldVector::new(Arc::new(StringArray::from(vec![
+                "Alice", "Bob", "Carol",
+            ])))),
+            Arc::new(ArrowFieldVector::new(Arc::new(Float64Array::from(vec![
+                95000.0, 87000.0, 102000.0,
+            ])))),
+        ];
+
+        RecordBatch::new(schema, fields)
+    }
+
+    #[test]
+    fn test_record_batch_row_count() {
+        let out = create_record_batch().row_count();
+        assert_eq!(out, 3)
+    }
+
+    #[test]
+    fn test_record_batch_col_count() {
+        let out = create_record_batch().column_count();
+        assert_eq!(out, 3)
+    }
+
+    #[test]
+    fn test_record_batch_fields() {
+        let out = create_record_batch().fields(0);
+        assert_eq!(out.size(), 3);
+        assert_eq!(out.get_type(), ArrowType::Int32)
+    }
+
+    #[test]
+    fn test_record_batch_to_csv() {
+        let out = create_record_batch().to_csv();
+        let expected = "1,Alice,95000\n2,Bob,87000\n3,Carol,102000\n";
+        assert_eq!(out, expected);
     }
 }

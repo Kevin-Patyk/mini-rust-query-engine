@@ -10,7 +10,7 @@ use crate::column_vector::ColumnVector;
 /// get_type() returns the stored ArrowType directly - no matching or downcasting needed.
 /// get_value() checks the index is in bounds, then returns a clone of the stored Arc value.
 /// size() returns the number of rows in the current batch.
-
+///
 /// A virtual column that returns the same value for every index.
 /// Rather than allocating memory for thousands of identical values,
 /// it stores the value once and returns it for any valid index.
@@ -65,9 +65,12 @@ impl ColumnVector for LiteralValueVector {
 
         // Check if the value is null.
         // If the value is null, return None.
-        if self.value.is_none() {
-            return None;
-        }
+        // The ? operator on an Option means: if this is None, return None early, otherwise unwrap it and continue.
+        // The ; at the end discards the unwrapped value.
+        // If self.value is None, return None, otherwise continue.
+        // It's the idiomatic Rust way to propagate None through a function.
+        // as_ref is needed here to avoid moving self.value out of the struct.
+        self.value.as_ref()?;
 
         self.value.clone()
     }

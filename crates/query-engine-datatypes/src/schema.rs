@@ -9,7 +9,7 @@ use crate::arrow_type::ArrowType;
 /// Schema::to_arrow() converts the entire Schema into an Apache Arrow Schema.
 /// Schema::project() returns a new schema with only the fields at the given indices.
 /// Schema::select() returns a new Schema with only the fields matching the given names.
-
+///
 /// Represents a single column definition in a schema.
 /// Contains the column name and its data type.
 /// Does not hold any actual data - just describes the structure.

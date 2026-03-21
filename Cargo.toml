@@ -2,8 +2,11 @@
 members = [
     "crates/query-engine-core",
     "crates/query-engine-datatypes",
+    "crates/query-engine-datasources",
 ]
 resolver = "2"
 
 [workspace.dependencies]
-arrow = "53"
+arrow = "58"
+parquet = "58"
+csv = "1.4.0"

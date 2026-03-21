@@ -1,0 +1,133 @@
+What Is a Query Engine?
+
+-----
+
+If you have written code to search through a list or filter items in an array, you have already implemented a tiny query engine. A query engine is simply software that retrieves and processes data based on some criteria. The difference between your `for` loop and a production query engine is scale, generality, and optimization, but the core idea is the same.
+
+Consider this Python code that finds all students with a GPA above 3.5:
+
+```
+high_achievers = []
+for student in students:
+    if student.gpa > 3.5:
+        high_achievers.append(student)
+
+```
+
+This is querying data. Now imagine you need to do this across millions of records stored in files, join data from multiple sources, group results, and compute aggregates, all while keeping response times reasonable. That is what query engines do. 
+
+A query engine is fundamentally just a system that takes some criteria (a query) and returns matching data. 
+
+-----
+
+From Code to Queries
+
+The code above works, but it has limitations. What if you want to change the filter condition? You would need to modify and recompile the code. What if someone without programming experience needs to analyze the data?
+
+Query languages like SQL solve this by providing a declarative way to express what data you want, without specifying how to get it:  
+
+```
+SELECT name, gpa
+FROM students
+WHERE gpa > 3.5;
+```
+
+The query expressions the same logic as our Python loop, but the query engine decides how to execute it efficiently. This separation of "what" from "how" is powerful. The same query can run against a small file or a distributed cluster of servers. 
+
+-----
+
+Anatomy of a Query Engine
+
+A query engine transforms a query (like the SQL above) into actual results through several stages:
+
+1. Parsing: Convert the query into a structured representation (like an abstract syntax tree).
+2. Planning: Determine which operations are needed (scan, filter, join, aggregate).
+3. Optimization: Reorder and transform operations for efficiency. 
+4. Execution: Actually process the data and produce results. 
+
+The pipeline might remind you of a compiler and that is no coincidence. Query engines are essentially specialized compilers that translate declarative queries into efficient execution plans. 
+
+-----
+
+A Concrete Example
+
+Let us look at a slightly more complex query:
+
+```
+SELECT department, AVG(salary)
+FROM employees
+WHERE hire_date > '2020-01-01'
+GROUP BY department
+ORDER BY AVG(salary) DESC;
+```
+
+This query:
+
+* Scans the `employees` table.
+* Filters to only recent hires.
+* Groups employees by department.
+* Computes the average salary per department.
+* Sorts the results by that average.
+
+A query engine must determine the most efficient way to execute these operations. Should it filter before or after grouping? How should it store intermediate results? These decisions significantly impact performance, especially with large datasets.
+
+-----
+
+SQL: The Universal Query Language
+
+SQL (Structured Query Language) has been the dominant query language since the 1970s. You will encounter it in many places. 
+
+-----
+
+Beyond SQL: DataFrame APIs
+
+Whilst SQL is ubiquitous, many query engines also provide programmatic APIs. These are especially popular in data science where queries are often built dynamically or mixed with custom code. 
+
+Here is the a query expressed using Apache Spark's DataFrame API in Scala:
+
+```
+val spark = SparkSession.builder
+  .appName("Example")
+  .master("local[*]")
+  .getOrCreate()
+
+val result = spark.read.parquet("/data/employees")
+  .filter($"hire_date" > "2020-01-01")
+  .groupBy("department")
+  .agg(avg("salary").as("avg_salary"))
+  .orderBy(desc("avg_salary"))
+
+result.show()
+```
+
+The DataFrame API provides the same logical operations as SQL but expressed as method calls. Under the hood, both approaches generate the same query plan. 
+
+-----
+
+Why Build a Query Engine?
+
+Understanding query engines helps you:
+
+* Write better queries, because knowing how queries are executed helps you write efficient ones.
+* Debug performance issues, because understanding the optimizer helps diagnose slow queries.
+* Appreciate database internals, because query engines are at the heart of every database.
+* Build data tools, because many applications need query-like functionality.
+
+Query engines also touch many area of computer science: parsing and compilers, data structures, algorithms, distributed systems, and optimization. Building one is excellent practice. 
+
+-----
+
+What This Book Covers
+
+This book walks through building a complete query engine from scratch. We will implement:
+
+* A type system for representing data.
+* Data source connectors for reading files.
+* Logical and physical query plans.
+* A SQL parser and planner.
+* Query optimization rules.
+* Parallel and distributed execution.
+
+The query engine will be intentionally simple, optimized for learning rather than production use. But the concepts apply directly to real systems.
+
+-----
