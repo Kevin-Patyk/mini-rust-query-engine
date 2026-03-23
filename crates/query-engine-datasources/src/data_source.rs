@@ -1,6 +1,23 @@
 use query_engine_datatypes::record_batch::RecordBatch;
 use query_engine_datatypes::schema::Schema;
 
+/// Summary:
+/// DataSource is a trait that defines the interface for reading data into the query engine.
+/// Any data source (CSV files, Parquet files, in-memory data, etc.) implements this trait
+/// allowing the rest of the engine to read data without caring about the underlying storage format.
+///
+/// schema() acquires the schema from the data source - the column names and their types.
+/// The schema serves two purposes:
+/// 1. At planning time, it is consulted before any data is read to validate column references,
+///    type check expressions, and decide which columns to request in the projection.
+/// 2. At execution time, it is packaged into each RecordBatch alongside the actual data
+///    so that anything downstream in the query engine knows what the columns mean.
+///
+/// scan() opens the data source and returns an iterator of RecordBatches.
+/// Each RecordBatch contains a slice of rows from the file paired with schema,
+/// and is the fundamental unit of data that flows through the query engine for processing.
+/// The projection parameter narrows which columns are returned, so the engine never reads more data than it actually needs.
+
 // A trait defines a shared interface that different types can implement.
 // It describes what a type can do without specifying how.
 // It is a shared interface that different types can implement using dynamic dispatch, meaning the concrete type is
@@ -12,6 +29,10 @@ use query_engine_datatypes::schema::Schema;
 pub trait DataSource {
     /// Returns the schema of the underlying data source.
     /// Called during query planning so the engine knows what columns and types are available.
+    /// The query engine needs the schema before it touches any data.
+    /// During query planning, it uses the schema to validate column references, determine output types for expressions and
+    /// decide which columns to request in the projection.
+    /// Without the schema, the engine is flying blind.
     fn schema(&self) -> Schema;
 
     /// Scans the data source, returning only the columns specified by name.

@@ -65,6 +65,8 @@ impl CsvDataSource {
     /// Infers a schema by opening the file and reading the header row.
     /// Every column is typed as a String since CSV has no type information.
     /// If has_headers is false, columns are named field_1, field_2, etc.
+    /// If you infer the schema, every column will come back as ArrowType::String because
+    /// CSV has no type information embedded in the file.
     pub fn infer_schema(&self) -> Schema {
         // File::open takes a path and returns a Result<File, Error>.
         // It asks the OS to open the file at the path for reading.
