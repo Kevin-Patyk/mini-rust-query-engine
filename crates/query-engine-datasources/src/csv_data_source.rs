@@ -147,12 +147,17 @@ impl CsvIterator {
 /// The struct holds the state and next() is what advances that state forward. Every call to next()
 /// moves the csv reader's cursor forward by up to batch_size rows, so the state naturally tracks progress through the file.
 /// When the reader is exhausted, next() returns None and the iterator is done.
+/// This is where the real work happens
+/// schema() describes the data and scan() sets up the iterator, but next() is where the file is actual read
+/// the rows are parsed, the types are converted, and everything gets packaged into a RecordBatch.
+/// The iterate is the engine of the data source.
 impl Iterator for CsvIterator {
     type Item = RecordBatch;
 
     fn next(&mut self) -> Option<RecordBatch> {
         // Collect up to batch_size rows from the csv reader.
         // Each StringRecord is one row of raw string values.
+        // Here, we are reading the file in and only taking batch_size number of rows.
         let records: Vec<csv::StringRecord> = self
             .csv_reader
             .records()
@@ -166,7 +171,8 @@ impl Iterator for CsvIterator {
         }
 
         // Pivot rows into columns.
-        // columns[0] is all the value for the first column, columns[1] for the second, etc.
+        // columns[0] is all the values for the first column, columns[1] for the second, etc.
+        // We need to pivot into columns since our query engine is assuming a columnar format.
         let mut columns: Vec<Vec<String>> = Vec::new();
         for col_index in 0..self.schema.fields.len() {
             let mut column: Vec<String> = Vec::new();
@@ -178,6 +184,9 @@ impl Iterator for CsvIterator {
 
         // Convert each Vec<String> column into an ArrowFieldVector
         // by matching on the field's data type and building the correct Arrow array.
+        // Currently, columns are all String values since CSV has no type information.
+        // The schema tells us what type each column should be, so we parse each
+        // string value into the correct type during this conversion step.
         let arrow_columns: Vec<ArrowFieldVector> = self
             .schema
             .fields
@@ -185,7 +194,7 @@ impl Iterator for CsvIterator {
             .enumerate()
             // Our mapping will be taking the fields in our Schema and converting them to actual columns of data
             // based on the values we have in the columns we made in the step before.
-            // So for each field in our schema, we make a corresponding actual column of data which will go into our RecordBatch
+            // So for each field in our schema, we make a corresponding actual column of data which will go into our RecordBatch.
             .map(|(col_index, field)| {
                 let col_data = &columns[col_index];
                 let array: ArrayRef = match field.data_type {
@@ -341,6 +350,10 @@ impl Iterator for CsvIterator {
             schema: self.schema.clone(),
             fields: arrow_columns
                 .into_iter()
+                // arrow_columns is a Vec<ARrowFieldVector> - a vec of concrete types,
+                // but RecordBatch.fields expects Vec<Arc<dyn ColumnVector>> - a vec of trait objects.
+                // So we need to wrap each ArrowFieldVector in an Arc and explicitly cast to Arc<dyn ColumnVector>,
+                // so Rust knows to treat it as a trait object.
                 .map(|v| Arc::new(v) as Arc<dyn ColumnVector>)
                 .collect(),
         })
@@ -366,6 +379,8 @@ impl DataSource for CsvDataSource {
     /// If no projection is provided, all columns are returned.
     /// scan() doesn't do any reading itself, it just sets up the CsvIterator and returns it.
     /// The actual reading only happens when something starts pulling from the iterator.
+    /// scan() is where the schema and the data meet. It reads the raw values from the file, organizes them
+    /// into columns, and packages them together with the schema into RecordBatch.
     fn scan(&self, projection: Vec<String>) -> Box<dyn Iterator<Item = RecordBatch>> {
         // Opening the file.
         let file = File::open(&self.filename).expect("Failed to open CSV file");
