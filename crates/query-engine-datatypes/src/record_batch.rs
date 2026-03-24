@@ -16,6 +16,7 @@ use crate::schema::Schema;
 /// paired with a schema that describes what those columns are.
 /// This is the fundamental unit of data that flows through the query engine.
 /// Schema is the blueprint (column names and types) and the RecordBatch is the actual chunk of data conforming to that blueprint.
+#[derive(Clone)]
 pub struct RecordBatch {
     // Anything receiving a batch knows what the columns mean.
     pub schema: Schema,

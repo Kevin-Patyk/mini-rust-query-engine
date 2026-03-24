@@ -49,3 +49,11 @@ pub trait DataSource {
     // Since every data source (CSV, Parquet, in-memory) will return a different iterator struct, we need the indirection to return them all under a single trait object.
     // In other words, we use Box because the compiler needs a fixed-size pointer to put on the stack and dyn Iterator alone has no known size at compile time.
 }
+
+// The DataSource trait defines 2 methods: schema() and scan().
+// schema() returns the structure of the data - the column names and their types.
+// scan() resolves the final schema based on the projection, builds a reader to access the raw data,
+// and handes both off to a stateful iterator.
+// The iterator is the engine of the data source - each call to next() reads the next batch of raw data, converts
+// the columns into ArrowFieldVectors, pairs them with the schema, and returns a RecordBatch.
+// This continues until the data is exhausted and next() returns None.

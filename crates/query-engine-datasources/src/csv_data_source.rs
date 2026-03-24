@@ -47,7 +47,7 @@ pub struct CsvDataSource {
 
 impl CsvDataSource {
     /// This is just a constructor.
-    /// It lets you create CsvDataSource by passing in the fields rather than have to write it out every time.
+    /// It lets you create CsvDataSource by passing in the fields rather than having to write it out every time.
     pub fn new(
         filename: String,
         schema: Option<Schema>,
@@ -154,11 +154,13 @@ impl CsvIterator {
 impl Iterator for CsvIterator {
     type Item = RecordBatch;
 
-    fn next(&mut self) -> Option<RecordBatch> {
+    fn next(&mut self) -> Option<Self::Item> {
         // Collect up to batch_size rows from the csv reader.
         // Each StringRecord is one row of raw string values.
         // Here, we are reading the file in and only taking batch_size number of rows.
         let records: Vec<csv::StringRecord> = self
+            // The CSV reader already wraps and iterator that tracks its own position internally,
+            // so we don't need to manually track the position ourselves.
             .csv_reader
             .records()
             .take(self.batch_size)
@@ -174,6 +176,9 @@ impl Iterator for CsvIterator {
         // columns[0] is all the values for the first column, columns[1] for the second, etc.
         // We need to pivot into columns since our query engine is assuming a columnar format.
         let mut columns: Vec<Vec<String>> = Vec::new();
+        // Iterate over only the columns defined in the schema.
+        // If a projection was applied, self.schema.fields only contains the requested columns
+        // so we naturally only read from those columns without any extra filtering needed.
         for col_index in 0..self.schema.fields.len() {
             let mut column: Vec<String> = Vec::new();
             for row in &records {
@@ -360,6 +365,7 @@ impl Iterator for CsvIterator {
     }
 }
 
+/// Implements the DataSource trait for CsvDataSource.
 impl DataSource for CsvDataSource {
     /// Returns the schema for this data source.
     /// If a schema was provided at construction time, it is returned directly.
