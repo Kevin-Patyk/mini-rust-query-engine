@@ -1,0 +1,143 @@
+Data Sources
+
+A query engine needs data to query. The data might come from CSV files, Parquet files, databases, or even data that already exists in memory. We want our query engine to work with any of these without caring about the details. This chapter introduces the data source abstraction that makes all this possible.
+
+-----
+
+Why Abstract Data Sources?
+
+Consider a simple query:
+
+```
+SELECT name, salary FROM employees WHERE department = 'Engineering'
+```
+
+From the query engine's perspective, it needs to:
+
+1. Know what columns exist (to validate `name`, `salary`, and `department` are real).
+2. Know the types of those columns (to validate that comparing `department` to string makes sense).
+3. Read the actual data, preferably just the columns it needs.
+
+Whether `employees` is a CSV file, a Parquet file, or an in-memory table, these requirements are the same. By defining a common interface, we can write query planning and execution logic once and have it work with any data source.
+
+-----
+
+Our query engine defines a simple interface that all data sources must implement.
+
+`schema()` returns the schema of the data, the column names and their types. The query planner uses this during planning to validate queries. If you reference a column that does not exist, the planner can report an error before execution happens.
+
+`scan(projection)` reads the data and returns it as a sequences of record batches. The `projection` parameter lists which columns to read. This is important for efficiency: if a query only uses three columns from a table with fifty columns, we should only read those three. Some file formats like Parquet support this natively. For others like CSV, we might read everything but only build vectors for the requested columns.
+
+The return type from `scan()` will enable streaming. Rather than loading an entire file into memory, we can process it batch by batch. This matters when data is larger than available memory.
+
+-----
+
+CSV Data Sources
+
+CSV is the simplest format to understand but has some awkward properties. The file is just text with values separated by commas (or tabs, or semicolons). There is no schema embedded in the file, only optional column names in the first row.
+
+Here is what a CSV file might look like:
+
+```
+id,name,department,salary
+1,Alice,Engineering,95000
+2,Bob,Sales,87000
+3,Carol,Engineering,102000
+```
+
+To read this, we need to handle several things:
+
+1. Parse column names from the header row (if present).
+2. Infer or accept a schema (what type are these columns?).
+3. Parse text values into typed values.
+4. Handle missing or malformed values. 
+
+Our `CsvDataSource` will accept an optional schema. If provided, it uses that schema. If not, it infers one by reading the header row and treating all columns as strings.
+
+The `scan` method streams through the file, parsing rows into batches. For each batch, it creates Arrow vectors and populates them with parsed values.
+
+CSV files are text, but our schema might specify that a column is an integer or a float. Our CSV reader must parse these strings into typed values. 
+
+Empty values become nulls. Invalid values (like "abc" in an integer column) will throw an exception, which is the right behavior since the data does not match the declared schema.
+
+As a note, since CSV files don't have any schema or metadata, you have to scan every row for every query, since there is no metadata to tell the engine which rows are relevant or what types the columns are.
+
+-----
+
+Parquet Data Source
+
+Parquet is a binary columnar format designed for analytics. Unlike CSV, Parquet files contain:
+
+* Schema information (column names, types, nullability).
+* Data organized in column chunks within row groups.
+* Compression.
+* Optional statistics (min/max values per column chunk).
+
+This makes Parquet much more efficient for query engines. Reading a single column means reading just that column's data, not the entire file. The schema is known without inference. And compression reduces both storage and I/O.
+
+Our `ParquetDataSource` will be much simpler than the `CsvDataSource` because the Parquet library will provide much of what we need. 
+
+The schema will come directly from the file's metadata. The scan reads row groups one at a time, converting Parquet's columnar format to Arrow vectors.
+
+Row groups are just batches of rows, and within each batch the data is reorganized into column chunks. You take a horizontal slice of rows, say 0-999, and within that slice you group all the values for each column together contiguously. So all 1000 `salary` values sit next to each other in memory, all 1000 `name` values sit next to each other, and so on. That's the column chunk. The row group is just the boundary that says "these column chunks all cover the same 1000 rows."
+
+Parquet has a footer. The engine reads the footer first to find out where every column chunk lives and what its min/max stats are. That means if you query `WHERE salary > 150000`, the engine can look at the footer stats and skip entire row groups where `max salary = 120000` without reading a single bye of actual data. CSV has none of this - you have to scan every row. 
+
+Parquet's columnar organization means projection pushdown is efficient. When we request only certain columns, the Parquet reader only decompresses and reads those column chunks. For wide tables (hundreds of columns) where queries touch only a few, this can be order of magnitude faster than reading everything.
+
+-----
+
+In-Memory Data Source
+
+Sometimes data is already in memory, perhaps loaded from another source or generated by a previous query. Our `InMemoryDataSource` wraps existing record batches.
+
+This is useful for testing and for queries that build on other queries. Projection here just selects which columns to include in the output batches.
+
+An `InMemoryDataSource` would just hold a `Vec<RecordBatch>` and a `Schema`. `schema()` returns the schema directly since it's already in memory - no file to open. `scan()` just iterates over the batches, applying the projection to narrow the columns if needed. 
+
+-----
+
+Other Data Sources
+
+Real query engines support many more data sources. Some common ones:
+
+* JSON: Structured but schema-less. Each line might be a JSON object. Schema inference is possible but complex since nested structures must be flattened or represented as Arrow's nested types.
+* ORC: Similar to Parquet, another columnar format popular in the Hadoop ecosystem. Data is stored in columnar "stripes" with schema and statistics.
+* Databases: Query engines can read from other databses via JDBC or native protocols. The schema comes from the database's catalog. Pushing predicates down to the source database can dramatically reduce data transfer.
+* Object Storage: Cloud systems like S3 or GCS can serve as data sources. The query engine lists files matching a pattern and reads them, often in paralle. 
+* Streaming Sources: Kafka, Kinesis, or other message queues. These require different handling since data arrives continuously rather than being read from a file.
+
+-----
+
+Schema-less Sources
+
+Some data sources do not have fixed schemas. JSON documents can have different fields in each record. Schema-on-read systems defer schema decisions until query time. 
+
+Handling schema-less sources adds complexity. Options include:
+
+* Requires users to declare schema explicitly.
+* Infer a schema from a sample of the data.
+* Use a flexible representation like a map of string to value.
+* Reject queries that reference non-existent fields at runtime rather than planning time.
+
+Our query engine requires schemas at planning time, so schema-less sources must provide or infer schema somehow.
+
+-----
+
+Connecting Data Sources to the Query Engine
+
+Data sources plug into the query engine through the execution context. We will register the data sources with names:
+
+```
+val ctx = ExecutionContext()
+ctx.registerCsv("employees", "data/employees.csv")
+ctx.registerParquet("sales", "data/sales.parquet")
+
+val result = ctx.sql("SELECT * FROM employees e JOIN sales s ON e.id = s.employee_id")
+```
+
+The query planner resolves table names to data sources, retrieves schemas for validation, and creates scan operations in the query plan. The details of CSV versus Parquet versus anything else are hidden behind the `DataSource` interface.
+
+This separation is powerful. Adding support for a new file format means implementing two methods. The rest of the query engine, from planning through optimization to execution, works without modification.
+
+-----
