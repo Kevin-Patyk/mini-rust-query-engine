@@ -3,6 +3,7 @@ members = [
     "crates/query-engine-core",
     "crates/query-engine-datatypes",
     "crates/query-engine-datasources",
+    "crates/query-engine-logical-plan",
 ]
 resolver = "2"
 

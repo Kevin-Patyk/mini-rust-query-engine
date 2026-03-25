@@ -1,0 +1,8 @@
+[package]
+name = "query-engine-logical-plan"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+query-engine-datatypes = { path = "../query-engine-datatypes" }
+query-engine-datasources = { path = "../query-engine-datasources" }

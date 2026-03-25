@@ -782,6 +782,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "query-engine-logical-plan"
+version = "0.1.0"
+dependencies = [
+ "query-engine-datasources",
+ "query-engine-datatypes",
+]
+
+[[package]]
 name = "query-engine-main"
 version = "0.1.0"
 dependencies = [
