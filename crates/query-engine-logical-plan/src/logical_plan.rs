@@ -11,7 +11,7 @@ use query_engine_datatypes::schema::Schema;
 /// So when the compiler sees &dyn LogicalPlan, it knows it can safely call to_string() on it.
 pub trait LogicalPlan: fmt::Display {
     // Returns the schema of the data that will be produced by the logical plan.
-    fn schema(&self) -> &Schema;
+    fn schema(&self) -> Schema;
 
     /// Returns the children (inputs) of this logical plan.
     /// Used to walk the plan tree - a scan returns an empty vec, a filter returns
