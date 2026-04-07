@@ -1,32 +1,33 @@
-use std::sync::Arc;
 use std::fmt::{self, Formatter};
+use std::sync::Arc;
 
 use query_engine_datasources::data_source::DataSource;
 use query_engine_datatypes::schema::Schema;
+
 use crate::logical_plan::LogicalPlan;
 
-/// Scan is the leaf node of every logical plan tree. It represents reading data from a data source 
+/// Scan is the leaf node of every logical plan tree. It represents reading data from a data source
 /// (CSV, Parquet, in-memory) and is the point where data enters the query engine.
 /// Every query tree bottoms out at one or more Scan nodes.
-/// 
+///
 /// The rest of the plan tree (Filter, Projection, Aggregate, Join) needs data to work with.
 /// Scan is what supplies that data. It holds a reference to a DataSource and describes which columns
 /// to read via the projection. No other plan node knows or cares about the underlying storage format - that is entirely Scan's responsbility.
-/// 
+///
 /// schema() returns the output schema of this Scan - either the full schema from the data source if no projection was specified
 /// or a narrowed schema containing only the requested columns. This is called at planning time so upstream nodes know what columns are available
 /// to them. No data is read here.
-/// 
+///
 /// children() returns an empty Vec because Scan has no inputs - it is the bottom of the tree.
 /// Other nodes return their child plans here so the tree can be walked recursively.
-/// Scan has nothing below it so there is nothing to return.-
-/// 
+/// Scan has nothing below it so there is nothing to return.
+///
 /// The entire logical plan layer is just a description - it's a blueprint of what the query will do. No data is touched anywhere
 /// in this layer. When you call schema() on Scan, it calls datasource.schema() which just returns the column names and types - that's metadata, not data.
 /// The actual datasource.scan() that opens the file and reads rows happens during the physical plan layer.
-/// The whole logical plan tree is just a data structure sitting in memory describing the same of the query
+/// The whole logical plan tree is just a data structure sitting in memory describing the shape of the query
 /// It answers: what columns will this produce? what transformations will happen? without doing any actual work yet.
-/// 
+///
 /// In the logical plan, expressions are just carried around as data. A Filter node holds a BinaryExpr but doesn't call anything on it
 /// it just stores and uses it to answer "what is my output schema?" A Projection node holds a list of expressions but only calls
 /// to_field() on them to derive its schema.
@@ -35,6 +36,9 @@ use crate::logical_plan::LogicalPlan;
 
 pub struct Scan {
     pub path: String,
+    // We are using Arc here since the data source can geniunely be shared
+    // It is a resource that multiple parts of the engine might need to reference
+    // so Arc makes sense here
     pub datasource: Arc<dyn DataSource>,
     pub projection: Vec<String>,
 }
@@ -51,7 +55,8 @@ impl LogicalPlan for Scan {
         if self.projection.is_empty() {
             self.datasource.schema()
         } else {
-            let projection_refs: Vec<&str> = self.projection.iter().map(|name| name.as_str()).collect();
+            let projection_refs: Vec<&str> =
+                self.projection.iter().map(|name| name.as_str()).collect();
             // Vec<T> can coerce to &[T] automatically in Rust - deref coercion
             // So &Vec<&str> becomes &[&str] because Vec implements the Deref trait
             self.datasource.schema().select(&projection_refs).unwrap()

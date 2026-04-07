@@ -1,0 +1,393 @@
+Logical Plans and Expressions
+
+When you write a SQL query, you describe what you want. The query engine must figure out how to get it. The first step is building a logical plan: a tree structure that represents the computation without specifying how to execute it.
+
+Consider this query:
+
+```
+SELECT name, salary * 1.1 AS new_salary
+FROM employees
+WHERE department = 'Engineering'
+```
+
+Before we can execute this, we need a structured representation. The logical plan captures:
+
+* Read from the `employees` table.
+* Keep only rows where `department = "Engineering"`.
+* Compute `name` and `salary * 1.1` for each remaining row.
+
+This chapter covers how to represent these operations as a tree of logical plans and expressions.
+
+-----
+
+Why Separate Logical from Physical?
+
+We could jump straight from SQL to execution, but separating logical and physical planning has advantages:
+
+1. Validation: We can check that columns exist and types are compatible before doing any work.
+2. Optimization: We can transform the logical plan to make it more efficient.
+3. Flexibility: The same logical plan might execute differently depending on data size or available resources. 
+
+A logical plan says "filter rows where X" without specifying whether to use an index, a hash table, or a sequential scan. Those are physical executions details to decide later.
+
+-----
+
+The LogicalPlan Interface
+
+A logical plan represents a relation: a set of rows with a known schema. Each plan can have child plans as inputs, forming a tree.
+
+schema() returns the output schema, the columns, and their types that this plan produces. This is essential for validation. If a later plan references a column, we can check that it exists in the input schema.
+
+children() returns the input plans. A scan has no children (it reads from the data source). A filter has one child (its input). A join has 2 children (left and right inputs). This method enables walking the plan tree.
+
+A logical plan is a description of what you want to compute, without saying how to compute it. It answers the question: "What is the result I want?" - not "What steps should the CPU take to get there?"
+
+For example, if you write:
+
+```
+SELECT name FROM users WHERE age > 30
+```
+
+The logical plan for this is roughly:
+
+* I want a projection of the `name` column,
+* From a filter where `age > 30`,
+* From a scan of the `users` table.
+
+That's it. No mention of which index to use, whether to do a full table scan, how much memory to allocate, or what order to process the rows in. Those are decisions for the physical plan (or execution plan), which comes later.
+
+The logical plan is a tree of intentions. Each node in the tree is a relation - something that produces rows with a known schema. The tree structure captures the dependencies: you can't filter before you scan, and you can't project before you filter.
+
+The separation is valuable because it lets you optimize in between. Once you have the logical plan, a query optimizer can rewrite it - push filters down closer to the scan, reorder joins, eliminate unnecessary projections - before ever deciding how to physically execute anything. The optimizer works on the what, and only then do you translate the how.
+
+Logical plans have leaf nodes (nodes with no children), such as scan because it reads directly from a data source and has nothing feeding into it. They also have internal nodes (nodes with at least one child). Filter, projection, join - these all take input from another plan below them, so they're internal nodes. The root is the topmost internal node - it's the final result you're asking for. Logical plans are read from the bottom up. 
+
+As a note, child nodes are passed in when you construct the plan node. So when you build a `Filter` node, you would give it 2 things:
+
+1. A filter expression (`age > 30`)
+2. The input plan (its child)
+
+The filter expression is just data attached to the node - it's not a plan itself. A child is a plan that comes before it in the pipeline - the one that feeds rows into it. Here, "child" means "input", not below.
+
+-----
+
+Printing Logical Plans
+
+Debugging query engines requires seeing what the plan looks like. We print plans as idented trees where children are nested under their parents. Our example query might print as:
+
+```
+Projection: #name, #salary * 1.1 AS new_salary
+  Filter: #department = 'Engineering'
+    Scan: employees; projection=None
+```
+
+Read this bottom-up: scan the employees table, filter to Engineering, project the columns we want.
+
+-----
+
+Logical Expressions
+
+Plans describe data flow. Expressions describe computations within a plan. A filter plan containers an expression that evaluates to true or false for each row. A projection plan contains expressions that compute output columns. 
+
+Expressions can be simple (a column reference, a literal value) or complex (nested arithmetic, function calls). Here are common expressions types:
+
+Expression Type	        Examples
+
+Literal Value	        "hello", 12.34, true
+Column Reference	user_id, first_name, salary
+Math Expression	salary * 0.1, price + tax
+Comparison Expression	age >= 21, status != 'inactive'
+Boolean Expression	age >= 21 AND country = 'US'
+Aggregate Expression	MIN(salary), MAX(salary), SUM(amount), COUNT(*)
+Scalar Function	UPPER(name), CONCAT(first_name, ' ', last_name)
+Aliased Expression	salary * 1.1 AS new_salary
+
+Expressions form trees. The expression `(a + b) * c` has a multiply at the root with two children: an add expression (with children `a` and `b`) and a column reference `c`.
+
+Expressions are to a plan node what a plan node is to a plan tree - they form their own tree nested inside the plan.
+
+A `Filter` node sits in the plan tree and has `children()` pointing to other plan nodes. But is also carries an expression - something like `age > 30` - and that expression is itself a tree:
+
+GreaterThan
+├── ColumnReference("age")
+└── Literal(30)
+
+And a more complex on like `(salary * 0.1) + bonus > 5000)`:
+
+GreaterThan
+├── Add
+│   ├── Multiply
+│   │   ├── ColumnReference("salary")
+│   │   └── Literal(0.1)
+│   └── ColumnReference("bonus")
+└── Literal(5000)
+
+A few things worth noting:
+
+The expression tree is evaluated per row. For every row coming out of the child plan, the engine walks the expression tree bottom-up - resolving column references to actual values, applying operators - and produces a single result. For a filter that result is true or false. For a projection it's the computed output value.
+
+Expressions don't have `children()` in the plan sense - they're not `LogicalPlan` nodes. They have their own separate trait and their own recursive structure. When you walk the plan tree via `children()`, you visit plan nodes only. Expressions are data sitting on those nodes, walked separately if needed. This is why we said earlier that the predicate on a `Filter` is not a child - it lives on a different tree entirely, just one that happens to be attached to a plan node.
+
+Terminology so far:
+
+1. Query - What the user writes, a user's request for data - describes what the user wants without saying anything about how to get it
+2. Logical plan - The tree of transformations built from the query that the user writes
+3. Plan node - One node in the tree (`Filter`, `Projection`, etc.)
+4. Expression - A computation attached to a plan node, forming its own sub-tree
+
+-----
+
+The LogicalExpr Interface
+
+During planning, we need to know what type of value an expression produces. If you write `a + b`, that is only valid if both columns are numeric. Our interface will capture this.
+
+The `toField` method returns the name and data type of the expression's output. It takes the input plan because some expressions depend on the input schema. A column reference has the type of whatever column it references. A comparison expression always returns Boolean regardless of its inputs.
+
+-----
+
+Column Expressions
+
+The simplest expression references a column by name. 
+
+The `to_field()` implementation looks up the column in the input schema. If it does not exist, that is an error, which we catch during planning rather than execution. 
+
+The `#` prefix in `to_string()` is a convention to distinguish column references from literal strings when printing plans.
+
+-----
+
+Literal Expressions
+
+Expressions like `salary * 1.1` need to represent the literal value `1.1`. We need literal expressions for each data type.
+
+Literal expressions do not depend on the input plan so their type is fixed.
+
+-----
+
+Binary Expressions
+
+Most operators take two inputs: comparison (`=`, `<`, `>`), Boolean logic (`AND`, `OR`), and arithmetic (`+`, `-`, `*`, `/`).
+
+-----
+
+Comparison and Boolean Expressions
+
+Comparisons and Boolean operators always produce Boolean results.
+
+-----
+
+Math Expressions
+
+In our query engine, arithmetic expressions preserve the type of the left operand. This is a simplified approach. A production system would handle type promotion.
+
+-----
+
+Aggregate Expressions
+
+Aggregates reduce multiple rows to a single value: `SUM`, `MIN`, `MAX`, `AVG`, `COUNT`. They appear in aggregate plans (covered later) and have special semantics.
+
+Most aggregates return the same type as their input expression. `MIN(salary)` on a double column returns double. `MAX(age)` on an integer column returns an integer. This makes sense since min, max, sum, and average values share the type of what they are aggregating.
+
+`COUNT` is different. It returns a count of rows, which is always an integer regardless of what column you are counting. `COUNT(salary)` returns Int32 whether the salary is stored as an integer, double, or string.
+
+-----
+
+Aliased Expressions
+
+SQL's `AS` keyword renames an expression's output. The alias changes the name but preserves the type.
+
+-----
+
+Logical Plans
+
+With expressions defined, we can build the plans that use them. Currently, our expressions know 2 things: what type they produce (`to_field`) and how to display itself for debugging using the `Display` trait.
+
+Expressions alone are just building blocks though. They cannot do anything on their own - they describe what to compute, not where to compute it or what data to compute it on. That's where the logical plan comes in.
+
+A logical plan is essentially a node in a tree that says "here's what I want to do with data." The book has 5 fundamental ones that we will cover:
+
+1. Scan - The source. Reads data from a `DataSource` with an optional column projection. Leaf node, no child plans.
+2. Filter - Wraps a child plan and a Boolean expression. Passes through only rows where the expression is true. Our `WHERE` clause.
+3. Projection - Wraps a child plan and a list of expressions. Transforms the columns - renaming, computing new ones, dropping others. Your `SELECT` list.
+4. Aggregate - Wraps a child plan with 2 expression lists: group-by expressions and aggregate expressions (like `SUM`, `COUNT`, `MAX`). Our `GROUP BY`.
+5. Join - Combine 2 child plans (left and right) on some join condition. The most complex one- needs to know the join type and the condition to match one.
+
+Expressions answer "what do I compute?" - `salary * 1.1`, `age > 30`, `SUM(salary)`. They're the math and logic.
+
+Logical plans answer "what do I do with data?" - scan this source, filter these rows, project these columns. They're the structure of the query.
+
+The logical plan uses the expressions to describe their behavior. A `Filter` plan doesn't know how to evaluate `age > 30` yet - it just holds that expression as a description of what filtering needs to happen. A `Projection` plan just holds a list of expressions describing what the output columns will be.
+
+The actual evaluation - running the expressions against real data row-by-row - happens later in the physical plan layer. The logical plan is just a blueprint. It's declarative, not executable.
+
+We will have 2 trees at different scales. 
+
+The logical plan tree is the big structure - each node is a whole operation like Scan, Filter, Projection. It describes the shape of the entire query.
+
+The expression tree lives inside of individual plan nodes. When a `Filter` holds `age > 30`, that `age > 30` is itself a small tree - a `BinaryExpr` with a `Column("age")` on the left, a `LiteralInt(30` on the right, and `>` as the operator. 
+
+So a query like `SELECT name FROM employees WHERE age > 30` looks like:
+
+Projection               ← plan node
+  └─ Filter              ← plan node
+       └─ Scan           ← plan node
+
+Filter holds:
+  BinaryExpr(>)          ← expression node
+    ├─ Column("age")     ← expression node
+    └─ LiteralInt(30)    ← expression node
+
+Projection holds:
+  Column("name")         ← expression node
+
+The plan tree is shallow - usually just a handful of nodes. The expression trees inside each node can be arbitrarily deep depending on how complex the expressions are, but in practice they are also usually small. 
+
+When you eventually walk the plan tree to execute it, at each node you'll also walk its expression tree to evaluate it against data.
+
+The logical plan says what steps happen and in what order - scan this table, then filter it, then project it.
+
+The expressions say what the math is at each step - at the filter step, the condition is `age > 30`. At the projection step, the output columns are `name` and `salary * 1.1`.
+
+The plan is the recipe. The expressions are the individual instructions with each step of the recipe.
+
+-----
+
+Scan
+
+`Scan` reads from a data source. It is the leaf node in every query tree, the place where data enters the plan. The `projection` parameter lists what columns to read. If empty, read all columns. This optimization matters because reading fewer columns means less I/O and less memory.
+
+-----
+
+Selection (Filter)
+
+`Selection` keeps only rows where an expression evaluates to true. This corresponds to SQL's `WHERE` clause. The schema passes through unchanged since filtering only removes rows, not columns.
+
+-----
+
+Projection
+
+`Projection` computes new columns from expressions. This corresponds to SQL's `SELECT` list.
+
+The output schema comes from the expressions. If you project `name` and `salary * 1.1 AS bonus`, the output schema has two columns with those names and appropriate types.
+
+-----
+
+Aggregate
+
+`Aggregate` groups rows and computes aggregate functions. This corresponds to SQL's `GORPU BY` with aggregate functions. The output schema has the grouping columns first, followed by the aggregate results. For `SELECT department, AVG(salary) FROM employees GROUP BY department`, the output has 2 columns: `department` and `AVG(salary)`.
+
+-----
+
+Join
+
+`Join` combines rows from two inputs based on join keys. Unlike the plans we have seen so far, joins have two children: a left input and a right input.
+
+The `on` parameter specifies pairs of column names to join on: the first element names a column from the left input, the second from the right. The output schema combines columns from both inputs, deduplicating columns with matching names in the join keys. 
+
+The join type determines which rows appear in the output: inner join returns only matching rows, outer joins include unmatched rows with nulls.
+
+Joins are fundamental to relational queries but come with significant complexity: multiple join types, various join algorithms with different performance characteristics, and optimization challenges. The joins chapter covers these topics in depth.
+
+-----
+
+Putting It Together
+
+Here is how our example query becomes a logical plan:
+
+```
+SELECT name, salary * 1.1 AS new_salary
+FROM employees
+WHERE department = 'Engineering'
+```
+
+Building bottom-up:
+
+```
+let scan = Scan {
+    path: "employees".to_string(),
+    datasource: Arc::new(employee_data_source),
+    projection: vec![],
+};
+
+let filter = Selection {
+    input: Box::new(scan),
+    expr: Box::new(Eq {
+        l: Box::new(Column { name: "department".to_string() }),
+        r: Box::new(LiteralString { value: "Engineering".to_string() })
+    }),
+};
+
+let project = Projection {
+    input: Box::new(filter),
+    expr: vec![
+        Box::new(Column { name: "name".to_string() }),
+        Box::new(Alias {
+            expr: Box::new(Multiply {
+                l: Box::new(Column { name: "salary".to_string() }),
+                r: Box::new(LiteralDouble {value: 1,1 }),
+            }),
+            alias: "new_salary".to_string(),
+        }),
+    ],
+};
+```
+
+Notice how it builds bottom-up - `Scan` first, wrapped in `Selection`, wrapped in `Projection`. Each node takes ownership of the one below it via `Box::new()`. 
+
+Printed:
+
+```
+Projection: #name, #salary * 1.1 as new_salary
+  Filter: #department = 'Engineering'
+    Scan: employees; projection=None
+```
+
+The logical plan can now be validated (do columns exist?), optimized (can we push the projection into the scan), and eventually converted to a physical plan for execution.
+
+In this chapter, we have built the logical plan layer - the blueprint layer of the query engine. Specifically: 
+
+Five plan nodes, each implementing the `LogicalPlan` trait with `schema()`, `children()`, and `Display`:
+
+* `Scan` - the leaf node. Wraps a data source and an optional projection. No children.
+* `Selection` - filters rows using a single Boolean expression. One child.
+* `Projection` - transforms columns using a list of expressions. One child.
+* `Aggregate` - groups rows and collapses them using aggregate expressions. One child.
+* `Join` - combines two input plans on matching column pairs. Two children.
+
+What each node contributes:
+
+* `schema()` - each node knows how to derive its output schema. Scan narrows the data sources schema, Selection passes it through unchanged, and Projection builds it from `to_field()` on its expressions, Aggregate combines group and aggregate fields, Join merges left and right schemas while deduplicating.
+* `children()` - each node reports its immediate inputs so the tree can be walked.
+* `Display` - Each node prints itself so the whole tree can be formatted for debugging via `format_inner()`.
+
+What this layer does not do:
+
+* No data is read.
+* No expressions are evaluated.
+* No rows are processed.
+
+This is purely a description of what the query will do - a data structure sitting in memory waiting for the physical plan layer to pick it up and actually execute it.
+
+Each plan node owns expressions, but they serve different purposes at different times.
+
+At planning time - the plan nodes use expressions only to derive their output schema via `to_field()`. Projection calls `to_field()` on each of its expressions to know what columns it will produce. Aggregate calls `to_field()` on both its group and aggregate expressions. Selection doesn't even call `to_field()` on its expression at all - it just stores and passes the child schema through unchanged.
+
+At execution time (which is not yet built) - the physical plan will pick up those same expressions and actually evaluate them against real `RecordBatch`es row-by-row. That's when `evaluate()` gets called on expressions, producing `ColumnVector`s of actual values.
+
+So the relationship is:
+
+* Plan nodes describe the structure of the query - what transformations happen and in what order.
+* Expressions describe the computation within each transformation - what to calculate, compare, or aggregate.
+
+A plan node without expressions has no idea what to compute. An expression without a plan node has no data to compute against. They need each other - the plan node provides context (what data is available via `schema()`) and the expression provides logic (what to do with the data).
+
+-----
+
+Serialization
+
+Query plans sometimes need to be serialized: sent across a network, stored for later, or passed between systems in different languages.
+
+Options include language specific serialization or language-agnostic formats. 
+
+A newer standard call Substrait aims to provide cross-language serialization for relational algebra. If you are building a query engine today, Substrait is worth investigating.
+
+-----
