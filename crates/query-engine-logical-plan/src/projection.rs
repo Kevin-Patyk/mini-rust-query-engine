@@ -5,7 +5,7 @@ use query_engine_datatypes::schema::Schema;
 use crate::logical_expr::LogicalExpr;
 use crate::logical_plan::LogicalPlan;
 
-/// Projection holds an input plan and a list off expressions that define the output columns.
+/// Projection holds an input plan and a list of expressions that define the output columns.
 /// Unlike Selection, which holds a single expression, Projection holds a Vec of expressions
 /// because SELECT can produce multiple output columns - each one described by its own expression.
 /// For example, SELECT name, age, salary * 1.1 produces three output columns,
