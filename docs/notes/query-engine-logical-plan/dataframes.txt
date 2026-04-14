@@ -1,0 +1,199 @@
+DataFrame API
+
+The previous chapter showed how to represent queries as logical plans. But constructing those plans by hand is tedious. This chapter introduces the DataFrame API, a fluent interface that makes building logical plans natural and readable.
+
+-----
+
+Building Plans the Hard Way
+
+Consider this query:
+
+```
+SELECT id, first_name, last_name, state, salary
+FROM employee
+WHERE state = 'CO'
+```
+
+To build this as a logical plan, we construct each piece separately then wire them together:
+
+```
+use std::sync::Arc;
+use crate::datasource::CsvDataSource;
+use crate::logical_plan::{Scan, Selection, Projection};
+use crate::logical_expr::{Column, LiteralString, Eq};
+
+let csv = CsvDataSource::new("employee.csv");
+let scan = Scan {
+    path: "employee".to_string(),
+    datasource: Arc::new(csv),
+    projection: vec![],
+};
+
+let filter_expr = Eq(
+    Box::new(Column("state".to_string())),
+    Box::new(LiteralString("CO".to_string())),
+);
+
+let selection = Selection {
+    input: Box::new(scan),
+    expr: Box::new(filter_expr),
+};
+
+let projection_list: Vec<Box<dyn LogicalExpr>> = vec![
+    Box::new(Column("id".to_string())),
+    Box::new(Column("first_name".to_string())),
+    Box::new(Column("last_name".to_string())),
+    Box::new(Column("state".to_string())),
+    Box::new(Column("salary".to_string())),
+];
+
+let plan = Projection {
+    input: Box::new(selection),
+    expr: projection_list,
+};
+```
+
+This works, but it is verbose and the code structure does not mirror the query structure. We can improve this slightly by nesting the constructors:
+
+```
+let plan = Projection {
+    input: Box::new(Selection {
+        input: Box::new(Scan {
+            path: "employee".to_string(),
+            datasource: Arc::new(CsvDataSource::new("employee.csv")),
+            projection: vec![],
+        }),
+        expr: Box::new(Eq {
+            left: Box::new(Column("state".to_string())),
+            right: Box::new(LiteralString("CO".to_string())),
+        }),
+    }),
+    expr: vec![
+        Box::new(Column("id".to_string())),
+        Box::new(Column("first_name".to_string())),
+        Box::new(Column("last_name".to_string())),
+        Box::new(Column("state".to_string())),
+        Box::new(Column("salary".to_string())),
+    ],
+};
+```
+
+This is more compact, but harder to read. The nesting goes from inside out, opposite to how we think about query execution (scan first, then filter, then project).
+
+-----
+
+The DataFrame Approach 
+
+A DataFrame wraps a logical plan and provides methods that return new DataFrames. Each method call adds a node to the plan. This creates a fluent API where code reads top-to-bottom in execution order:
+
+```
+let df = ctx.csv("employee.csv")
+    .filter(Eq {
+        left: Box::new(Column("state".to_string())),
+        right: Box::new(LiteralString("CO".to_string())),
+    })
+    .project(vec![
+        Box::new(Column("id".to_string())),
+        Box::new(Column("first_name".to_string())),
+        Box::new(Column("last_name".to_string())),
+        Box::new(Column("state".to_string())),
+        Box::new(Column("salary".to_string())),
+    ]);
+```
+
+Read this as: start with the CSV file, filter to Colorado, project the columns we want. The code structure matches the mental model.
+
+-----
+
+The DataFrame Interface
+
+The interface is simple. Each transformation method (`project`, `filter`, `aggregate`, `join`) returns a new DataFrame. This enables method chaining. The `schema` method exposes the output schema for inspection. The `logicalPlan` method retrieves the underlying plan when we need it for optimization or execution. 
+
+-----
+
+Implementation
+
+The implementation wraps a logical plan and creates new plan nodes on each method call.
+
+Each method constructs a new logical plan node with the current plan as input, then wraps it in a new DataFrame. The original DataFrame is unchanged (DataFrames are immutable) so you can branch from any point.
+
+Join combines two DataFrames based on matching column pairs. The "Joins" chapter covers join types and algorithms in detail.
+
+-----
+
+Execution Context
+
+We need a starting point for building DataFrames. The execution context creates initial DataFrames from data sources. Later chapters expand this context to handle query execution. For now, it just creates DataFrames.
+
+-----
+
+Convenience Methods
+
+The basic API works but is still verbose. We can make it more expression. Helpers functions create expressions concisely. Infix operators let us write expressions naturally. We can then write queries that read almost like SQL:
+
+```
+val df = ctx.csv("employee.csv")
+    .filter(col("state") eq lit("CO"))
+    .project(listOf(
+        col("id"),
+        col("first_name"),
+        col("last_name"),
+        col("salary"),
+        (col("salary") mult lit(0.1)) alias "bonus"
+    ))
+    .filter(col("bonus") gt lit(1000))
+```
+
+This reads as: take the CSV, keep rows where state equals CO, compute id, names, salary, and a 10% bonus column, then keep rows where bonus exceeds 1,000.
+
+-----
+
+DataFrames vs SQL
+
+Both DataFrames and SQL describe what data you want. Why offer both?
+
+SQL is familiar to analysts and can be embedded in applications as strings. But SQL strings are opaque to the compiler. Typos and type errors only appear at runtime.
+
+DataFrames integrate with the programming language. The compiler catches method name typos. IDEs provide autocomplete. You can build queries dynamically using normal programming constructs.
+
+Most modern query engines support both interfaces. Users choose based on their needs.
+
+-----
+
+The Underlying Plan
+
+However we build it, rhe result is a logical plan. Our example query:
+
+```
+val df = ctx.csv("employee.csv")
+    .filter(col("state") eq lit("CO"))
+    .project(listOf(col("id"), col("first_name"), col("last_name"), col("salary")))
+```
+
+Produces this plan:
+
+```
+Projection: #id, #first_name, #last_name, #salary
+  Filter: #state = 'CO'
+    Scan: employee.csv; projection=None
+```
+
+The DataFrame is just convenient way to construct this tree. Once built, the plan goes through optimization and physical planning regardless of how it was created.
+
+-----
+
+Summary
+
+To summarize what the entire logical plan layer is:
+
+Expressions: The computations that live inside nodes. `Column`, `LiteralString`, `Eq`, `Sum`, etc. Each one knows its output type via `to_field()`.
+
+Logical Plan Nodes: `Scan`, `Selection`, `Projection`, `Aggregate`, Join`. Each one knows its output schema by either delegating to the data source or calling `to_field()` on its expressions. They form a tree via `children()`.
+
+DataFrame API - A fluent builder that hides the manual node construction behind method chaining. `filter()`, `project()`, `aggregate()`, etc. just wrap `self.plan` in a new node each time.
+
+And critically - none of this does any actual work. No data is read, no rows are filtered, no columns are computed. The entire logical plan later is just a blueprint sitting in memory describing what the query intends to do.
+
+The next big layer is the physical plan, which takes this blueprint and actually executes it against real data.
+
+-----
