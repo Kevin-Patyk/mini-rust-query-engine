@@ -4,6 +4,7 @@ use query_engine_datatypes::arrow_type::ArrowType;
 use query_engine_datatypes::schema::Field;
 
 use crate::logical_expr::LogicalExpr;
+use crate::logical_plan::LogicalPlan;
 
 /// This module defines all the concrete expression types that implement LogicalExpr.
 ///
@@ -35,6 +36,20 @@ use crate::logical_expr::LogicalExpr;
 
 // Columns --------------------
 
+/// Column is a leaf node in the expression tree - it has no child expressions stored inside it.
+/// Its only field is the column name, which is a String, not a Box<dyn LogicalExpr>.
+/// 
+/// The input: &dyn LogicalPlan parameter in to_field is not a child - it is just context
+/// passed in from outside so Column can look up whether a field with its name exists in the schema. 
+/// Column borrows it temporarily for one lookup and then forgets it.
+/// 
+/// This is different from internal expression nodes like BinaryExpr which actually own
+/// their left and right children as Box<dyn LogicalExpr> fields - those are true children
+/// in the expression tree that BinaryExpr recurses into when to_field is called.
+/// 
+/// So the rule is: a leaf node has no Box<dyn LogicalExpr> fields.
+/// An internal node has one or more Box<dyn LogicalExpr> fields.
+
 /// Column is the most fundamental expression.
 /// It's a leaf node that just holds a column name and looks it up in the input plan's schema when to_field is called.
 pub struct Column {
@@ -45,8 +60,8 @@ pub struct Column {
 impl LogicalExpr for Column {
     // This will look up the field in the input plan's schema - it doesn't know
     // the name or type ahead of time, they discover it at planning time by searching through the schema.
-    // Literals always know their type, where Column wioll have to ask the schema for the type
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    // Literals always know their type, where Column will have to ask the schema for the type
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         input
             .schema() // get the schema from the input plan
             .fields // Access the Vec of fields
@@ -89,7 +104,7 @@ pub struct ColumnIndex {
 }
 
 impl LogicalExpr for ColumnIndex {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         input
             .schema() // Get the schema from the input plan
             .fields // Access the Vec of fields
@@ -127,7 +142,7 @@ pub struct LiteralString {
 }
 
 impl LogicalExpr for LiteralString {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         // The input plan is not used - a literal doesn't depend on any schema
         // The field name is the value itself
         // The type is always String since this is a String literal
@@ -153,7 +168,7 @@ pub struct LiteralLong {
 
 impl LogicalExpr for LiteralLong {
     // The input plan is not used - a literal doesn't depend on any schema
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: self.value.to_string(),
             data_type: ArrowType::Int64,
@@ -172,7 +187,7 @@ pub struct LiteralDouble {
 }
 
 impl LogicalExpr for LiteralDouble {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         // The input plan is not used - a literal doesn't depend on any schema
         Field {
             name: self.value.to_string(),
@@ -192,7 +207,7 @@ pub struct LiteralFloat {
 }
 
 impl LogicalExpr for LiteralFloat {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         // The input plan is not used - a literal doesn't depend on any schema
         Field {
             name: self.value.to_string(),
@@ -212,7 +227,7 @@ pub struct LiteralBoolean {
 }
 
 impl LogicalExpr for LiteralBoolean {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         // The input plan is not used - a literal doesn't depend on any schema
         Field {
             name: self.value.to_string(),
@@ -260,7 +275,7 @@ pub struct Eq {
 }
 
 impl LogicalExpr for Eq {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: "eq".to_string(),
             data_type: ArrowType::Boolean,
@@ -280,7 +295,7 @@ pub struct Neq {
 }
 
 impl LogicalExpr for Neq {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: "neq".to_string(),
             data_type: ArrowType::Boolean,
@@ -300,7 +315,7 @@ pub struct Gt {
 }
 
 impl LogicalExpr for Gt {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: "gt".to_string(),
             data_type: ArrowType::Boolean,
@@ -320,7 +335,7 @@ pub struct GtEq {
 }
 
 impl LogicalExpr for GtEq {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: "gt_eq".to_string(),
             data_type: ArrowType::Boolean,
@@ -340,7 +355,7 @@ pub struct Lt {
 }
 
 impl LogicalExpr for Lt {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: "lt".to_string(),
             data_type: ArrowType::Boolean,
@@ -360,7 +375,7 @@ pub struct LtEq {
 }
 
 impl LogicalExpr for LtEq {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: "lt_eq".to_string(),
             data_type: ArrowType::Boolean,
@@ -380,7 +395,7 @@ pub struct And {
 }
 
 impl LogicalExpr for And {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: "and".to_string(),
             data_type: ArrowType::Boolean,
@@ -400,7 +415,7 @@ pub struct Or {
 }
 
 impl LogicalExpr for Or {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: "or".to_string(),
             data_type: ArrowType::Boolean,
@@ -422,7 +437,7 @@ pub struct Add {
 }
 
 impl LogicalExpr for Add {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         Field {
             name: "add".to_string(),
             // The return type of an arithmetic expression is the same as the left child's type
@@ -445,7 +460,7 @@ pub struct Subtract {
 }
 
 impl LogicalExpr for Subtract {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         Field {
             name: "subtract".to_string(),
             data_type: self.l.to_field(input).data_type,
@@ -465,7 +480,7 @@ pub struct Multiply {
 }
 
 impl LogicalExpr for Multiply {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         Field {
             name: "multiply".to_string(),
             data_type: self.l.to_field(input).data_type,
@@ -485,7 +500,7 @@ pub struct Divide {
 }
 
 impl LogicalExpr for Divide {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         Field {
             name: "divide".to_string(),
             data_type: self.l.to_field(input).data_type,
@@ -505,7 +520,7 @@ pub struct Modulus {
 }
 
 impl LogicalExpr for Modulus {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         Field {
             name: "modulus".to_string(),
             data_type: self.l.to_field(input).data_type,
@@ -541,7 +556,7 @@ pub struct Sum {
 }
 
 impl LogicalExpr for Sum {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         Field {
             name: "sum".to_string(),
             // to_field is recursive - it calls to_field on the child expression,
@@ -568,7 +583,7 @@ pub struct Min {
 }
 
 impl LogicalExpr for Min {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         Field {
             name: "min".to_string(),
             data_type: self.expr.to_field(input).data_type,
@@ -587,7 +602,7 @@ pub struct Max {
 }
 
 impl LogicalExpr for Max {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         Field {
             name: "max".to_string(),
             data_type: self.expr.to_field(input).data_type,
@@ -606,7 +621,7 @@ pub struct Avg {
 }
 
 impl LogicalExpr for Avg {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         Field {
             name: "avg".to_string(),
             data_type: self.expr.to_field(input).data_type,
@@ -625,7 +640,7 @@ pub struct Count {
 }
 
 impl LogicalExpr for Count {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: "count".to_string(),
             data_type: ArrowType::Int32,
@@ -650,7 +665,7 @@ pub struct Alias {
 }
 
 impl LogicalExpr for Alias {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         Field {
             name: self.alias.clone(),
             data_type: self.expr.to_field(input).data_type,
@@ -684,7 +699,7 @@ pub struct Scalar {
 }
 
 impl LogicalExpr for Scalar {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: self.name.clone(),
             data_type: self.data_type.clone(),
@@ -711,7 +726,7 @@ pub struct Not {
 }
 
 impl LogicalExpr for Not {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: "not".to_string(),
             data_type: ArrowType::Boolean,
@@ -731,7 +746,7 @@ pub struct CastExpr {
 }
 
 impl LogicalExpr for CastExpr {
-    fn to_field(&self, input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, input: &dyn LogicalPlan) -> Field {
         Field {
             name: self.expr.to_field(input).name,
             data_type: self.target_type.clone(),
@@ -750,7 +765,7 @@ pub struct CountDistinct {
 }
 
 impl LogicalExpr for CountDistinct {
-    fn to_field(&self, _input: &dyn crate::logical_plan::LogicalPlan) -> Field {
+    fn to_field(&self, _input: &dyn LogicalPlan) -> Field {
         Field {
             name: "count_distinct".to_string(),
             data_type: ArrowType::Int32,
