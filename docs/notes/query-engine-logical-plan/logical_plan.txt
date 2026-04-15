@@ -391,3 +391,31 @@ Options include language specific serialization or language-agnostic formats.
 A newer standard call Substrait aims to provide cross-language serialization for relational algebra. If you are building a query engine today, Substrait is worth investigating.
 
 -----
+
+Extended Summary
+
+Expressions are the computations that live inside plan nodes. They form their own tree with two kinds of nodes:
+
+* Leaf nodes - `Column`, `LiteralInt`, `LiteralString`, etc. No child expressions, just raw data.
+* Internal nodes - `Eq`, `Gt`, `Multiply`, `Sum`, etc. Own left and right children as `Box<dyn LogicalExpr>`.
+
+Every expression implements two things:
+
+1. `to_field()` - describes what type and name the expression will produce, used at planning time for schema inference and validation.
+2. `Display` - prints the expression for debugging.
+
+Logical plan nodes are the skeleton of the query. They form a tree where data flows upward:
+
+* Lead node - `Scan`, the only plan node with no children, reads from a datasource.
+* Internal nodes - `Projection`, `Filter`, `Aggregate`, `Join`, `Limit` - each wraps one or more child plan nodes.
+
+Every plan node implements:
+
+1. `schema()` - either delegates to a child plan's schema or calls `to_field()` on its expressions to build a new schema.
+2. `children()` - returns the child plan nodes so the tree can be walked.
+
+DataFrame API is a fluent builder that hides manual node construction behind method chaining. Each method consumes `self`, wraps `self.plan` in a new node and returns a new `DataFrame`. 
+Nothing executes - it's just a blueprint.
+
+The key insight tying it all together: no data is every touched in the logical plan layer. It's purely a description of what the query intends to do. 
+The physical plan layer comes next and actually executes it.

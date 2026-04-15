@@ -4,6 +4,7 @@ members = [
     "crates/query-engine-datatypes",
     "crates/query-engine-datasources",
     "crates/query-engine-logical-plan",
+    "crates/query-engine-sql",
 ]
 resolver = "2"
 
@@ -11,3 +12,5 @@ resolver = "2"
 arrow = "58"
 parquet = "58"
 csv = "1.4.0"
+strum = "0.28.0"
+strum_macros = "0.28.0"

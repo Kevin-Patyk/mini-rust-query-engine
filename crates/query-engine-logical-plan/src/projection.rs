@@ -32,10 +32,10 @@ impl LogicalPlan for Projection {
     /// All the fields are collected into a Schema, which becomes the output schema of this Projection.
     /// This is why to_field() had to exist on every expression before we could build plan nodes -
     /// Projection cannot derive its schema without it.
-    /// 
+    ///
     /// Each plan node's schema() method works by asking expressions "What will you produce?" via to_field(), then
-    /// assembling those fields into a Schema to return. 
-    /// Each node will do this slightly differently. 
+    /// assembling those fields into a Schema to return.
+    /// Each node will do this slightly differently.
     /// But schema() on a plan node is really just "ask my expressions what they produce and that's my output schema."
     /// The expressions do the type inference via to_field() and schema() assembles the result.
     fn schema(&self) -> Schema {

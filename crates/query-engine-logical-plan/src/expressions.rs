@@ -38,15 +38,15 @@ use crate::logical_plan::LogicalPlan;
 
 /// Column is a leaf node in the expression tree - it has no child expressions stored inside it.
 /// Its only field is the column name, which is a String, not a Box<dyn LogicalExpr>.
-/// 
+///
 /// The input: &dyn LogicalPlan parameter in to_field is not a child - it is just context
-/// passed in from outside so Column can look up whether a field with its name exists in the schema. 
+/// passed in from outside so Column can look up whether a field with its name exists in the schema.
 /// Column borrows it temporarily for one lookup and then forgets it.
-/// 
+///
 /// This is different from internal expression nodes like BinaryExpr which actually own
 /// their left and right children as Box<dyn LogicalExpr> fields - those are true children
 /// in the expression tree that BinaryExpr recurses into when to_field is called.
-/// 
+///
 /// So the rule is: a leaf node has no Box<dyn LogicalExpr> fields.
 /// An internal node has one or more Box<dyn LogicalExpr> fields.
 

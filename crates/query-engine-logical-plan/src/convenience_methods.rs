@@ -3,7 +3,7 @@ use crate::logical_expr::LogicalExpr;
 
 /// Crates a Column expression from a string slice.
 /// Takes &str instead of String so callers can write col("state") directly
-/// rather than col("state".to_string()) - the conversion to String happens 
+/// rather than col("state".to_string()) - the conversion to String happens
 /// inside the function so the caller doesn't have to think about it.
 pub fn col(name: &str) -> Column {
     Column {
@@ -15,8 +15,8 @@ pub fn col(name: &str) -> Column {
 /// Takes &str so callers can write lit_str("CO") directly.
 /// rather than lit_str("CO".to_string())
 pub fn lit_str(value: &str) -> LiteralString {
-    LiteralString { 
-        value: value.to_string()
+    LiteralString {
+        value: value.to_string(),
     }
 }
 
@@ -45,22 +45,21 @@ pub fn lit_f32(value: f32) -> LiteralFloat {
 // and then lit() would take impl Literal and call to_expr() on it.
 // We use separate lit_str, lit_i64, etc. here for clarity since this is a learning project.
 
-
 /// An extension trait adds methods to an existing trait without modifying it.
-/// 
+///
 /// The pattern is:
 /// 1. Define a new trait with the methods you want to add
 /// 2. Implement it for any type that already implements the original trait
-/// 
+///
 /// For example, we can't add methods directly to LogicalExpr because it's defined in another module. But
 /// we can define LogicalExprExt and implement it for any T that implements LogicalExpr - then those methods
-/// are available on every expression type automatically. 
-/// 
-/// This is how Rust handles what other languages do with extension methods. 
-/// 
+/// are available on every expression type automatically.
+///
+/// This is how Rust handles what other languages do with extension methods.
+///
 /// A blanket implementation  looks like:
 /// impl<T: LogicalExpr> LogicalExprExt for T { ... }
-/// 
+///
 /// This reads as: "for any type T that implements LogicalExpr,
 /// also implement LogicalExprExt." So Column, Eq, LiteralString -
 /// every expression type gets these methods for free without having to implement the trait individually.
@@ -79,12 +78,12 @@ pub trait LogicalExprExt: LogicalExpr {
 }
 
 /// Blanket implementation of LogicalExprExt for every type T that implements LogicalExpr.
-/// This means Column, Eq, LiteralString, Sum - every expression type - automatically 
+/// This means Column, Eq, LiteralString, Sum - every expression type - automatically
 /// gets all 8 methods without needing a separate impl block for each one.
 /// Box<dyn LogicalExpr> is also covered, which is what enables chaining -
 /// the return value of every method already has these methods available on it.
 /// Box<dyn LogicalExpr> is covered since it itself implements LogicalExpr.
-/// 
+///
 /// The 'static bound is required because Box<dyn LogicalExpr> implicitly requires
 /// 'static - meaning the type inside cannot hold any borrowed references.
 /// Our expression types don't hold any references so this is fine.
@@ -111,7 +110,10 @@ impl<T: LogicalExpr + 'static> LogicalExprExt for T {
         Box::new(Multiply { l: self, r: rhs })
     }
     fn alias(self: Box<Self>, name: &str) -> Box<dyn LogicalExpr> {
-        Box::new(Alias { expr: self, alias: name.to_string() })
+        Box::new(Alias {
+            expr: self,
+            alias: name.to_string(),
+        })
     }
 }
 

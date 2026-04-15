@@ -16,7 +16,7 @@ impl LogicalPlan for Limit {
     /// Returns the input plan's schema unchanged.
     /// Limit only reduces the number of rows - it never adds, removes, or transforms.
     /// For nodes that don't change schema, we only rely on the input nodes schema.
-    /// If a node doesn't transform columns - it just filters, limits, or reorders rows - 
+    /// If a node doesn't transform columns - it just filters, limits, or reorders rows -
     /// it has nothing to compute itself.
     /// It just asks its input "What columns do you produce?" and passes that straight through
     /// The nodes that actually need to compute their own schema are the ones that change what columns exist:
