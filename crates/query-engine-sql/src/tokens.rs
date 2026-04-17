@@ -12,7 +12,7 @@ use strum_macros::EnumString;
 /// Represents the different kinds of literal values that can appear in a SQL query.
 /// For example, the number 42 would be a Long, 3.14 would be a Double,
 /// 'hello' would be a String, and a column/table name like "employees" would be an identifier.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Literal {
     Long,
     Double,
@@ -82,7 +82,7 @@ impl Literal {
 /// without escaping them with backticks because the tokenizer will always classify them as keywords first.
 #[derive(EnumString)]
 #[strum(ascii_case_insensitive)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Keyword {
     // Common
     Schema,
@@ -318,7 +318,7 @@ impl Keyword {
 /// Represents every SQL operator and punctuation mark the tokenizer recognizes.
 /// Unlike keywords, symbols are not words but special characters like +, -, *, =, etc.
 /// This is just the definition of what variants exist.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Symbol {
     // Parentheses and brackets
     LeftParen,
@@ -487,7 +487,7 @@ impl Symbol {
 /// TokenType::Literal(Literal::Long) tells you it is a literal AND it is a Long
 /// TokenType::Symbol(Symbol::Plus) tells you it is a symbol and it is a +
 /// This is just an enum and each variant in the enum takes another enum.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TokenType {
     // A reserved SQL word like SELECT, FROM, WHERE, etc.
     Keyword(Keyword),

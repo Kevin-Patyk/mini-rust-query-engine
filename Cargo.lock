@@ -796,20 +796,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "query-engine-logical-sql"
-version = "0.1.0"
-dependencies = [
- "strum",
- "strum_macros",
-]
-
-[[package]]
 name = "query-engine-main"
 version = "0.1.0"
 dependencies = [
  "arrow",
  "query-engine-datasources",
  "query-engine-datatypes",
+ "query-engine-logical-plan",
+ "query-engine-sql",
+]
+
+[[package]]
+name = "query-engine-sql"
+version = "0.1.0"
+dependencies = [
+ "strum",
+ "strum_macros",
 ]
 
 [[package]]

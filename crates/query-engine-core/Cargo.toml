@@ -7,3 +7,5 @@ edition = "2021"
 arrow = { workspace = true }
 query-engine-datatypes = { path = "../query-engine-datatypes" }
 query-engine-datasources = { path = "../query-engine-datasources" }
+query-engine-logical-plan = { path = "../query-engine-logical-plan" }
+query-engine-sql = { path = "../query-engine-sql" }

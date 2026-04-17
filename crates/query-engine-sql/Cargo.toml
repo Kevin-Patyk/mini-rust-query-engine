@@ -1,5 +1,5 @@
 [package]
-name = "query-engine-logical-sql"
+name = "query-engine-sql"
 version = "0.1.0"
 edition = "2021"
 
