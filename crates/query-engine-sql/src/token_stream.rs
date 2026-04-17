@@ -197,6 +197,21 @@ impl fmt::Display for TokenStream {
 // Our advance() method does the same job as Iterator::next() but keeps things simple and avoids the naming conflict
 // Clippy warned us about earlier.
 
+// A cursor is a common pattern in programming for tracking your current position when 
+// reading through a sequence of items one at a time.
+// You use a cursor when:
+// - You need to read items in order but not all at once
+// - You need to peek at the current item before deciding what to do with it
+// - You need to be able to roll back to a previous position if something doesn't match
+//
+// In our case we use a cursor twice:
+// - offset in SqlTokenizer tracks position in the raw SQL string (character level)
+// - i in TokenStream tracks position in the token list (token level)
+//
+// The pattern is always the same - start at 0, advance forward as you consume items
+// never go backwards except to roll back on a failed match. It's a simple but powerful way
+// to process any sequential data without loading everything into memory at once. 
+
 #[cfg(test)]
 mod tests {
     use super::*;
